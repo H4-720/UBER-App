@@ -13,6 +13,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -57,9 +61,64 @@ public class RideService {
 
         return mapToResponse(savedRide);
     }
+    public void updateRideWithDriver(String rideId, String driverId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(() -> new RuntimeException("Ride not fount"));
+        ride.setDriverId(driverId);
+        ride.setStatus(RideStatus.ACCEPTED);
+        rideRepository.save(ride);
+    }
+    public RideResponse startRide(String rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(() -> new RuntimeException("Ride not fount"));
+        if (ride.getStatus() != RideStatus.ACCEPTED) {
+            throw new RuntimeException("Ride cannot be started. Current status is " + ride.getStatus());
+        }
+        ride.setStatus(RideStatus.RIDE_STARTED);
+        ride.setStartAt(LocalDateTime.now());
+        rideRepository.save(ride);
+        return mapToResponse(ride);
+    }
 
+    public RideResponse completeRide(@Valid String rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(() -> new RuntimeException("Ride not fount"));
+        if (ride.getStatus() != RideStatus.RIDE_STARTED) {
+            throw new RuntimeException("Ride cannot be completed. Current status is " + ride.getStatus());
+        }
+        ride.setStatus(RideStatus.COMPLETED);
+        ride.setEndAt(LocalDateTime.now());
+        ride.setActualFare(ride.getEstimatedFare());
+        rideRepository.save(ride);
+        return mapToResponse(ride);
+    }
+
+    public RideResponse cancelRide(String rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(() -> new RuntimeException("Ride not fount"));
+        ride.setStatus(RideStatus.CANCELLED);
+        rideRepository.save(ride);
+        return mapToResponse(ride);
+    }
+
+    public RideResponse getRideById(String rideId) {
+        Ride ride = rideRepository.findById(rideId).orElseThrow(() -> new RuntimeException("Ride not fount"));
+        return mapToResponse(ride);
+    }
+    public List<RideResponse> getRidesByRider(String rideId) {
+        return rideRepository.findByRideIdOrderByCreatedAtDesc(rideId).stream().map(this::mapToResponse).collect(Collectors.toList());
+    }
     private double calculateEstimateFare(@Valid RideRequest rideRequest) {
-        return 0;
+        double lat1 = Math.toRadians(rideRequest.getPickUpLatitude());
+        double lon1 = Math.toRadians(rideRequest.getPickUpLongitude());
+
+        double lat2 = Math.toRadians(rideRequest.getDropOffLatitude());
+        double lon2 = Math.toRadians(rideRequest.getDropOffLongitude());
+        double  dlat = lat2 - lat1;
+        double  dlon = lon2 - lon1;
+
+        double a = Math.pow(Math.sin(dlat/2),2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin(dlon/2),2);
+        double c = 2 * Math.asin(Math.sqrt(a));
+        double distanceKm = 6371 * c;
+
+        double fare = 50 + (distanceKm * 12);
+        return Math.round(fare*100.0)/100.0;
     }
 
     private RideResponse mapToResponse(Ride savedRide) {
